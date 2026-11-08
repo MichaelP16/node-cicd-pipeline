@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tareas DevOps — ITLA</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; color: #202b3c; }
+    h1 { color: #1f3b63; } li { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+    li.hecha span { text-decoration: line-through; color: #777; }
+    form { display: flex; gap: 8px; } input { flex: 1; min-width: 0; padding: 8px; }
+    button { padding: 8px 14px; cursor: pointer; } li span { flex: 1; cursor: pointer; }
+    #aviso { padding: 10px; background: #eef4fb; }
+  </style>
+</head>
+<body>
+  <h1>Lista de tareas</h1>
+  <p id="aviso" role="status">Conectando con la aplicación...</p>
+  <form id="formulario">
+    <input id="titulo" placeholder="Nueva tarea" aria-label="Título de la tarea" required>
+    <button type="submit">Agregar</button>
+  </form>
+  <ul id="lista"></ul>
+  <script>
+    const lista = document.getElementById('lista');
+    const aviso = document.getElementById('aviso');
+    const claveLocal = 'tareas-devops-itla';
+    let apiDisponible = true;
+
+    async function solicitar(url, opciones) {
+      const respuesta = await fetch(url, opciones);
+      if (!respuesta.ok) throw new Error(`Error de API: ${respuesta.status}`);
+      return respuesta.status === 204 ? null : respuesta.json();
+    }
+
+    function leerTareasLocales() {
+      return JSON.parse(localStorage.getItem(claveLocal) || '[]');
+    }
+
+    function guardarTareasLocales(tareas) {
+      localStorage.setItem(claveLocal, JSON.stringify(tareas));
+    }
+
+    async function cargar() {
+      let tareas;
+      if (apiDisponible) {
+        try {
+          tareas = await solicitar('/api/tareas');
+          aviso.hidden = true;
+        } catch {
+          apiDisponible = false;
+        }
+      }
+      if (!apiDisponible) {
+        aviso.textContent = 'Modo GitHub Pages: las tareas se guardan en este navegador.';
+        aviso.hidden = false;
+        tareas = leerTareasLocales();
+      }
+
+      lista.replaceChildren();
+      tareas.forEach(tarea => {
+        const elemento = document.createElement('li');
+        if (tarea.completada) elemento.className = 'hecha';
+
+        const texto = document.createElement('span');
+        texto.textContent = tarea.titulo;
+        texto.title = 'Marcar como completada o pendiente';
+        texto.onclick = () => modificarTarea(tarea, 'completar');
+
+        const eliminar = document.createElement('button');
+        eliminar.type = 'button';
+        eliminar.textContent = 'Eliminar';
+        eliminar.setAttribute('aria-label', `Eliminar ${tarea.titulo}`);
+        eliminar.onclick = () => modificarTarea(tarea, 'eliminar');
+
+        elemento.append(texto, eliminar);
+        lista.appendChild(elemento);
+      });
+    }
+
+    async function modificarTarea(tarea, accion) {
+      try {
+        if (apiDisponible) {
+          const metodo = accion === 'eliminar' ? 'DELETE' : 'PATCH';
+          await solicitar(`/api/tareas/${tarea.id}`, { method: metodo });
+        } else {
+          const tareas = leerTareasLocales();
+          const actualizadas = accion === 'eliminar'
+            ? tareas.filter(item => item.id !== tarea.id)
+            : tareas.map(item => item.id === tarea.id ? { ...item, completada: !item.completada } : item);
+          guardarTareasLocales(actualizadas);
+        }
+        await cargar();
+      } catch (error) {
+        aviso.textContent = error.message;
+        aviso.hidden = false;
+      }
+    }
+
+    document.getElementById('formulario').onsubmit = async evento => {
+      evento.preventDefault();
+      const campo = document.getElementById('titulo');
+      const titulo = campo.value.trim();
+      if (!titulo) return;
+
+      try {
+        if (apiDisponible) {
+          await solicitar('/api/tareas', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ titulo })
+          });
+        } else {
+          const tareas = leerTareasLocales();
+          const id = tareas.reduce((mayor, tarea) => Math.max(mayor, tarea.id), 0) + 1;
+          guardarTareasLocales([...tareas, { id, titulo, completada: false }]);
+        }
+        campo.value = '';
+        await cargar();
+      } catch (error) {
+        aviso.textContent = error.message;
+        aviso.hidden = false;
+      }
+    };
+
+    cargar().catch(error => {
+      aviso.textContent = `No se pudieron cargar las tareas: ${error.message}`;
+      aviso.hidden = false;
+    });
+  </script>
+</body>
+</html>
